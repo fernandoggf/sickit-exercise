@@ -1,0 +1,557 @@
+
+library(readr)
+library(ggplot2)
+library(lattice)
+library(lubridate)
+library(dplyr)
+require(stats)
+library(e1071)
+library(nlme)
+
+# Carga de datos en esquema de data frame
+data <- read_csv("/Users/fernandofigueroa/Documents/Conbiota/Nabla/CAABSA/Lixiviados-datos-.csv")
+df <- as.data.frame(data)
+
+norma <- read_csv("/Users/fernandofigueroa/Documents/Conbiota/Nabla/CAABSA/Lixiviados - overview.csv")
+norma_df <- as.data.frame(norma)
+norma_df$`LMP NOM-001-SEMARNAT-1996` <- as.numeric(norma_df$`LMP NOM-001-SEMARNAT-1996`)
+
+# Corrección de fechas
+df$`FECHA DE MUESTREO` <- as.Date(df$`FECHA DE MUESTREO`, "%d-%m-%Y")
+df$`FECHA DE MUESTREO` <- df$`FECHA DE MUESTREO` %m+% years(2000)
+
+# Corrección en Columna MUESTRA (de 'fosas #' a #) y hacerlo factor
+length_muestra <- length(df$MUESTRA)
+length_list <- as.numeric(1:length_muestra)
+
+for(x in length_list){
+  df$MUESTRA[x] <- readr::parse_number(df$MUESTRA[x])
+}
+df$MUESTRA <- factor(df$MUESTRA, levels=1:26)
+
+#Conversión de 'MATERIA FLOTANTE' a variable dicotómica
+is.na_replace_0 <- df$`MATERIA FLOTANTE (mg/L)`                               
+is.na_replace_0[is.na(is.na_replace_0)] <- 0 
+df$`MATERIA FLOTANTE (mg/L)` <- is.na_replace_0
+
+for(x in length_list){
+  if(df$`MATERIA FLOTANTE (mg/L)`[x] == 'Presente'){
+    df$`MATERIA FLOTANTE (mg/L)`[x] <- 1
+  }
+  else{
+    df$`MATERIA FLOTANTE (mg/L)`[x] <- 0
+  }
+}
+
+# Conversión de columnas 'char' a numérico
+char_col <- sapply(df, is.character)
+data_char_as_num <- df
+data_char_as_num [ , char_col] <- as.data.frame(apply(data_char_as_num[ , char_col],
+                                                      2, as.numeric))
+sapply(data_char_as_num, class)
+df <- data_char_as_num
+
+
+# Checar cuantos NA hay en los datos
+sum(is.na(df))
+na_count <-sapply(df, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+#   Porcentaje de NA
+P_na <- function(z) (sum(is.na(z))/length(z)*100)
+data_P_Null <- apply(df, 2, P_na)
+data_P_Null
+
+
+#Exploraciones visuales de parámetros _____________________________________________________________________
+# pH, Temp, Materia flot, coliformes
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`pH (UpH)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[1], linetype="dashed", color = "red") +
+  labs(title='Medición de pH', x="Fecha de muestreo", y="UpH") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`TEMPERATURA (°C)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[2], linetype="dashed", color = "red") +
+  labs(title='Medición de Temperatura', x="Fecha de muestreo", y="ºC") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`MATERIA FLOTANTE (mg/L)`>0)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[3], linetype="dashed", color = "red")+
+  labs(title='Presencia de Materia Flotante', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`COLIFORMES FECALES (NMP/100mL)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[4], linetype="dashed", color = "red") +
+  labs(title='Medición de Coliformes Fecales', x="Fecha de muestreo", y="NMP/100mL") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+#DBO y DQO
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`DBO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[5], linetype="dashed", color = "red") +
+  labs(title='Medición de DBO Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`DQO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[6], linetype="dashed", color = "red") +
+  labs(title='Medición de DQO Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+#Grasas, huevos y sólidos
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`GRASAS Y ACEITES (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[7], linetype="dashed", color = "red") +
+  labs(title='Medición de Grasas y Aceites', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`HUEVOS DE HELMINTO (HH/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[8], linetype="dashed", color = "red") +
+  labs(title='Medición de Huevos de Helmito', x="Fecha de muestreo", y="HH/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`SÓLIDOS SEDIMENTABLES  (mL/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[9], linetype="dashed", color = "red") +
+  labs(title='Medición de Sólidos Sedimentables', x="Fecha de muestreo", y="mL/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`SÓLIDOS SUSPENDIDOS TOTALES (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[10], linetype="dashed", color = "red") +
+  labs(title='Medición de Sólidos Suspendidos Totales', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+
+#Metales
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`ARSÉNICO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[11], linetype="dashed", color = "red") +
+  labs(title='Medición de Arsénico', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`CADMIO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[12], linetype="dashed", color = "red") +
+  labs(title='Medición de Cadmio', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`CROMO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[13], linetype="dashed", color = "red") +
+  labs(title='Medición de Cromo', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`MERCURIO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[14], linetype="dashed", color = "red")  +
+  labs(title='Medición de Mercurio', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`COBRE (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[15], linetype="dashed", color = "red")   +
+  labs(title='Medición de Cobre', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`NÍQUEL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[16], linetype="dashed", color = "red") +
+  labs(title='Medición de Níquel', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`PLOMO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[17], linetype="dashed", color = "red") +
+  labs(title='Medición de Plomo', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`ZINC (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[18], linetype="dashed", color = "red")+
+  labs(title='Medición de Zinc', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+
+#Fisicobiol
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`NITRÓGENO TOTAL KJELDHAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[19], linetype="dashed", color = "red") +
+  labs(title='Medición de Nitrógeno Total KJELDHAL', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`FÓSFORO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[20], linetype="dashed", color = "red") +
+  labs(title='Medición de Fósforo Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`CIANUROS TOTALES (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[21], linetype="dashed", color = "red") +
+  labs(title='Medición de Cianuros Totales', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`NITRATOS (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[22], linetype="dashed", color = "red") +
+  labs(title='Medición de Nitratos', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`NITRITOS (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[23], linetype="dashed", color = "red")+
+  labs(title='Medición de Nitritos', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df, aes(x=`FECHA DE MUESTREO`,y=`NITRÓGENO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[24], linetype="dashed", color = "red")+
+  labs(title='Medición de Nitrógeno Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom")  + guides(colour = guide_legend(nrow = 1))
+
+
+
+# Agrupamos por Fosas, analisis estadísticos con boxplots _____________________________________________________________________
+# pH, Temp, Materia flot, coliformes
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(pH=(`pH (UpH)`))
+ggplot(data=group_fosas, aes(x=MUESTRA, y=pH)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[1], linetype="dashed", color = "red") +
+  labs(title='Medición de pH', x="Fosa", y="UpH") + theme(legend.position="bottom")
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(temp=`TEMPERATURA (°C)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=temp)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[2], linetype="dashed", color = "red") +
+  labs(title='Medición de Temperatura', x="Fecha de muestreo", y="ºC")
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(mat_flot=`MATERIA FLOTANTE (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=mat_flot)) + geom_bar(stat="identity")+
+  labs(title='Presencia de Materia Flotante', x="Fosa", y="mg/L")  
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(colif=`COLIFORMES FECALES (NMP/100mL)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=colif)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[4], linetype="dashed", color = "red") +
+  labs(title='Medición de Coliformes Fecales', x="Fosa", y="NMP/100mL")  
+
+#DBO y DQO
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(DBO=`DBO TOTAL (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=DBO)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[5], linetype="dashed", color = "red") +
+  labs(title='Medición de DBO Total', x="Fosa", y="mg/L") + ylim(0,10000)
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(DQO=`DQO TOTAL (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=DQO)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1) +
+  labs(title='Medición de DQO Total', x="Fosa", y="mg/L")  
+
+#Grasas, huevos y sólidos
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(grasas=`GRASAS Y ACEITES (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=grasas)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[7], linetype="dashed", color = "red")+
+  labs(title='Medición de Grasas y Aceites', x="Fosa", y="mg/L") + ylim(0,500)
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(hh=`HUEVOS DE HELMINTO (HH/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=hh)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+
+  labs(title='Medición de Huevos de Helmito', x="Fosa", y="HH/L") 
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(solid_1=`SÓLIDOS SEDIMENTABLES  (mL/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=solid_1)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[9], linetype="dashed", color = "red")+
+  labs(title='Medición de Sólidos Sedimentables', x="Fosa", y="mL/L")  
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(solid_2=`SÓLIDOS SUSPENDIDOS TOTALES (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=solid_2)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[10], linetype="dashed", color = "red") +
+  labs(title='Medición de Sólidos Suspendidos Totales', x="Fosa", y="mg/L") + ylim(0,2000)
+
+#Metales
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(ars=`ARSÉNICO (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=ars)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[11], linetype="dashed", color = "red") +
+  labs(title='Medición de Arsénico', x="Fosa", y="mg/L")  
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(cad=`CADMIO (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=cad)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[12], linetype="dashed", color = "red")
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(cro=`CROMO (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=cro)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[13], linetype="dashed", color = "red")+
+  labs(title='Medición de Cromo', x="Fosa", y="mg/L") 
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(mer=`MERCURIO (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=mer)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[14], linetype="dashed", color = "red")+
+  labs(title='Medición de Mercurio', x="Fosa", y="mg/L") + ylim(0,0.02)
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(cob=`COBRE (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=cob)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[15], linetype="dashed", color = "red")  +
+  labs(title='Medición de Cobre', x="Fosa", y="mg/L")  
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(niq=`NÍQUEL (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=niq)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[16], linetype="dashed", color = "red")+
+  labs(title='Medición de Níquel', x="Fosa", y="mg/L")  
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(pb=`PLOMO (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=pb)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[17], linetype="dashed", color = "red")+
+  labs(title='Medición de Plomo', x="Fosa", y="mg/L") 
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(zn=`ZINC (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=zn)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[18], linetype="dashed", color = "red")
+
+#Fisicobiol
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(nitkj=`NITRÓGENO TOTAL KJELDHAL (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=nitkj)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[19], linetype="dashed", color = "red") +
+  labs(title='Medición de Nitrógeno Total KJELDHAL', x="Fosa", y="mg/L") 
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(fos=`FÓSFORO TOTAL (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=fos)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[20], linetype="dashed", color = "red")+
+  labs(title='Medición de Fósforo Total', x="Fosa", y="mg/L") 
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(cian=`CIANUROS TOTALES (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=cian)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[21], linetype="dashed", color = "red")+
+  labs(title='Medición de Cianuros Totales', x="Fosao", y="mg/L")
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(nitra=`NITRATOS (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=nitra)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(nitri=`NITRITOS (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=nitri)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+
+  labs(title='Medición de Nitritos', x="Fosa", y="mg/L") + ylim(0,10)
+
+group_fosas <- df %>% group_by(MUESTRA) %>% summarise(nit_tot=`NITRÓGENO TOTAL (mg/L)`)
+ggplot(data=group_fosas, aes(x=MUESTRA, y=nit_tot)) + geom_boxplot(outlier.colour="blue", outlier.shape=2,outlier.size=1)+ 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[24], linetype="dashed", color = "red")+
+  labs(title='Medición de Nitrógeno Total', x="Fosa", y="mg/L") 
+
+
+# Análisis de varianzas
+var_fosas <- df %>% group_by(MUESTRA) %>% summarise(ph=var(`pH (UpH)`),temp=var(`TEMPERATURA (°C)`),
+                                                    mat=var(`MATERIA FLOTANTE (mg/L)`), colif=var(`COLIFORMES FECALES (NMP/100mL)`),
+                                                    DBO=var(`DBO TOTAL (mg/L)`), DQO=var(`DQO TOTAL (mg/L)`),
+                                                    grasa=var(`GRASAS Y ACEITES (mg/L)`), hh=var(`HUEVOS DE HELMINTO (HH/L)`),
+                                                    sol_1=var(`SÓLIDOS SEDIMENTABLES  (mL/L)`), sol_2=var(`SÓLIDOS SUSPENDIDOS TOTALES (mg/L)`),
+                                                    ars=var(`ARSÉNICO (mg/L)`), cad=var(`CADMIO (mg/L)`), cro=var(`CROMO (mg/L)`),
+                                                    mer=var(`MERCURIO (mg/L)`), cob=var(`COBRE (mg/L)`), niq=var(`NÍQUEL (mg/L)`),
+                                                    pb=var(`PLOMO (mg/L)`), zn=var(`ZINC (mg/L)`), nitkj=var(`NITRÓGENO TOTAL KJELDHAL (mg/L)`),
+                                                    fos=var(`FÓSFORO TOTAL (mg/L)`), cian=var(`CIANUROS TOTALES (mg/L)`),
+                                                    nitra=var(`NITRATOS (mg/L)`), nitri=var(`NITRITOS (mg/L)`), nit_tot=var(`NITRÓGENO TOTAL (mg/L)`))
+
+
+#Exploraciones visuales de parámetros limpios____________________________________________________________________
+# - Quitando NA
+#df_cut <- df
+#df_cut <- subset(df_cut, select =-c(`SÓLIDOS SEDIMENTABLES  (mL/L)`, `CADMIO (mg/L)`,
+#                                    `MERCURIO (mg/L)`, `NITRATOS (mg/L)`))
+#df_cut <- na.omit(df_cut)
+
+#Retiramos variables con alto porcentaje de NA
+df_cut <- df
+df_cut <- subset(df_cut, select =-c(`SÓLIDOS SEDIMENTABLES  (mL/L)`,
+                                    `ARSÉNICO (mg/L)`,
+                                    `CADMIO (mg/L)`,`ZINC (mg/L)`, 
+                                    `NITRATOS (mg/L)`))
+
+
+#df_cut <- df_cut[!(df_cut$MUESTRA==2 | df_cut$MUESTRA==14 | df_cut$MUESTRA==20 | df_cut$MUESTRA==12 | df_cut$MUESTRA==6 | df_cut$MUESTRA==16),]
+df_cut <- df_cut[(df_cut$MUESTRA==4|df_cut$MUESTRA==9|df_cut$MUESTRA==8|df_cut$MUESTRA==11|df_cut$MUESTRA==7|df_cut$MUESTRA==10|df_cut$MUESTRA==18),]
+
+
+
+## Modelos Loess para cada variable
+
+ph.lo <- loess(formula = df_cut$`pH (UpH)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+ph.lo
+summary(predict(ph.lo))
+
+temp.lo <- loess(formula = df_cut$`TEMPERATURA (°C)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+temp.lo
+summary(predict(temp.lo))
+
+mat.lo <- loess(formula = df_cut$`MATERIA FLOTANTE (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+mat.lo
+summary(predict(mat.lo))
+
+colif.lo <- loess(formula = df_cut$`COLIFORMES FECALES (NMP/100mL)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+colif.lo
+summary(predict(colif.lo))
+
+dbo.lo <- loess(formula = df_cut$`DBO TOTAL (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+dbo.lo
+summary(predict(dbo.lo))
+
+dqo.lo <- loess(formula = df_cut$`DQO TOTAL (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+dqo.lo
+summary(predict(dqo.lo))
+
+gras.lo <- loess(formula = df_cut$`GRASAS Y ACEITES (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+gras.lo
+summary(predict(gras.lo))
+
+solid.lo <- loess(formula = df_cut$`SÓLIDOS SUSPENDIDOS TOTALES (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+solid.lo
+summary(predict(solid.lo))
+
+cro.lo <- loess(formula = df_cut$`CROMO (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+cro.lo
+summary(predict(cro.lo))
+
+mer.lo <- loess(formula = df_cut$`MERCURIO (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+mer.lo
+summary(predict(mer.lo))
+
+cob.lo <- loess(formula = df_cut$`COBRE (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+cob.lo
+summary(predict(cob.lo))
+
+niq.lo <- loess(formula = df_cut$`NÍQUEL (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+niq.lo
+summary(predict(niq.lo))
+
+plo.lo <- loess(formula = df_cut$`PLOMO (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+plo.lo
+summary(predict(plo.lo))
+
+ntk.lo <- loess(formula = df_cut$`NITRÓGENO TOTAL KJELDHAL (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+ntk.lo
+summary(predict(ntk.lo))
+
+fos.lo <- loess(formula = df_cut$`FÓSFORO TOTAL (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+fos.lo
+summary(predict(fos.lo))
+
+cian.lo <- loess(formula = df_cut$`CIANUROS TOTALES (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+cian.lo
+summary(predict(cian.lo))
+
+nit.lo <- loess(formula = df_cut$`NITRITOS (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+nit.lo
+summary(predict(nit.lo))
+
+ntt.lo <- loess(formula = df_cut$`NITRÓGENO TOTAL (mg/L)` ~ as.numeric(df_cut$`FECHA DE MUESTREO`), data=df_cut, degree = 1, se=TRUE, na.rm=TRUE)
+ntt.lo
+summary(predict(ntt.lo))
+
+# Conjunto completo de datos 
+# pH, Temp, Materia flot, coliformes
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`pH (UpH)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[1], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE) +
+  labs(title='Medición de pH', x="Fecha de muestreo", y="UpH") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`TEMPERATURA (°C)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[2], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Temperatura', x="Fecha de muestreo", y="ºC") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`MATERIA FLOTANTE (mg/L)`>0)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[3], linetype="dashed", color = "red")+
+  labs(title='Medición de Materia Flotante', x="Fecha de muestreo") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`COLIFORMES FECALES (NMP/100mL)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[4], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Coliformes fecales', x="Fecha de muestreo", y="NMP/100mL") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+
+#DBO y DQO
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`DBO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[5], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de DBO Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`DQO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[6], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de DQO Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+
+#Grasas, huevos y sólidos
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`GRASAS Y ACEITES (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[7], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Grasas y Aceites', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`HUEVOS DE HELMINTO (HH/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[8], linetype="dashed", color = "red")+
+  labs(title='Medición de Huevos de Helmito', x="Fecha de muestreo", y="HH/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`SÓLIDOS SUSPENDIDOS TOTALES (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[10], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Sólidos suspendidos Totales', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+
+#Metales
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`CROMO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[13], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Cromo', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`MERCURIO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[14], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Mercurio', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`COBRE (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[15], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Cobre', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`NÍQUEL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[16], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Níquel', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`PLOMO (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[17], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Plomo', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+#Fisicobiol
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`NITRÓGENO TOTAL KJELDHAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[19], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Nitrógeno Total - KJELDHAL', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`FÓSFORO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[20], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Fósforo Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`CIANUROS TOTALES (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[21], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Cianuros Totales', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`NITRITOS (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[23], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Nitritos', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+ggplot(df_cut, aes(x=`FECHA DE MUESTREO`,y=`NITRÓGENO TOTAL (mg/L)`)) + geom_point(aes(color=factor(MUESTRA))) + 
+  geom_hline(yintercept=norma_df$`LMP NOM-001-SEMARNAT-1996`[24], linetype="dashed", color = "red") + 
+  geom_line(aes(color=factor(MUESTRA))) + 
+  stat_smooth(method="loess", se=TRUE, na.rm=TRUE)+
+  labs(title='Medición de Nitrógeno Total', x="Fecha de muestreo", y="mg/L") + theme(legend.position="bottom") + guides(colour = guide_legend(nrow = 1))
+
+
+#Modelo de regresión, DBO y DQO como respuesta
+
+df_cut <- df
+df_cut <- subset(df_cut, select =-c(`FECHA DE MUESTREO`,`MUESTRA`,
+                                    `SÓLIDOS SEDIMENTABLES  (mL/L)`,
+                                    `ARSÉNICO (mg/L)`,`CADMIO (mg/L)`,
+                                    `ZINC (mg/L)`, `NITRATOS (mg/L)`))
+
+model <- lm(`DBO TOTAL (mg/L)` ~ ., data = df_cut)
+summary(model)
+model <- lm(`NITRÓGENO TOTAL (mg/L)` ~ ., data = df_cut)
+summary(model)
+
+man.df <- manova(cbind(`DBO TOTAL (mg/L)`,`DQO TOTAL (mg/L)`) ~ ., data=df_cut)
+summary(man.df)
+
+man.df <- manova(cbind(`NITRÓGENO TOTAL (mg/L)`,`TEMPERATURA (°C)`) ~ ., data=df_cut)
+summary(man.df)
+
