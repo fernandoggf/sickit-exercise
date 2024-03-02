@@ -8,7 +8,9 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn import svm
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from statsmodels.multivariate.manova import MANOVA
@@ -190,7 +192,102 @@ print(result)
 # las interacciones, se añadirá al mismo repo esa parte en R.
 # De los resultados del MANOVA en R tenemos que las variables que se interrelacionan
 # en buena medida entre sí con la variable respuesta (Y) 'quality' son
-# 'volatile acidity', 'residual sugar chlorides', 'total sulfure dioxide', 'sulphates'
+# 'volatile acidity', 'residual sugar', chlorides', 'total sulfure dioxide', 'sulphates'
 # y 'alcohol' (***). En menor medida 'free sulfur dioxide' y 'pH' (*).
 # Con estos datos, quitaremos las variables que no mostraron significancia 
 # en los siguientes algoritmos.
+wine_man = pd.read_csv('winequality-red.csv')
+n = 0
+for x in wine_man['quality']:
+    if x >= 7:
+        wine_man.at[n, 'quality'] = 1
+    else:
+        wine_man.at[n, 'quality'] = 0
+    n = n+1
+wine_man = wine_man.drop(columns=['fixed acidity', 'citric acid', 
+                                  'free sulfur dioxide', 'density'], axis=0)
+# Repetimos el RFC con las columnas con mayor relevancia
+X = wine_man.drop('quality', axis=1)
+y = wine_man['quality']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state = 16)
+RFC = RandomForestClassifier(n_estimators = 600)
+RFC.fit(X_train, y_train)
+prediction_RFC = RFC.predict(X_test)
+print(classification_report(y_test, prediction_RFC))
+'''             precision    recall  f1-score   support
+
+           0       0.99      0.96      0.97        75
+           1       0.57      0.80      0.67         5
+
+    accuracy                           0.95        80
+   macro avg       0.78      0.88      0.82        80
+weighted avg       0.96      0.95      0.95        80
+'''
+print(confusion_matrix(y_test, prediction_RFC))
+'''[[[72  3]
+     [ 1  4]]'''
+# En general, es bueno prediciendo vino malo pero malo en predecir vino bueno.
+# Acoplando los resultados del MANOVA, vemos que al eliminar las variables
+# que no aportan en gran medida a la relación entre las variables con la respuesta
+# hay una ligera mejoria en el desempeño del RFC. Por lo tanto, este será el set
+# de datos que utilizaremos.
+# ---------------------------------------------------------------------------------------------------#
+# Segunda metodología: SVM Classifier
+clf = svm.SVC()
+clf.fit(X_train, y_train)
+pred_clf = clf.predict(X_test)
+print(classification_report(y_test, pred_clf,  zero_division=1))
+'''              precision    recall  f1-score   support
+
+           0       0.93      1.00      0.96       149
+           1       1.00      0.00      0.00        11
+
+    accuracy                           0.93       160
+   macro avg       0.97      0.50      0.48       160
+weighted avg       0.94      0.93      0.90       160
+'''
+print(confusion_matrix(y_test, pred_clf))
+'''[[149   0]
+    [ 11   0]]'''
+# Mejor desempeño que el RFC en predecir los buenos. SVM es más facil
+# y rápido de utilizar con data raw, sus diferencias son en como tratamos
+# la información antes.
+# ---------------------------------------------------------------------------------------------------#
+# Tercera metodología: Neural Network
+# Puede tratarse con mucha data (huge), aguanta análisis de texto, puede procesar
+# de muchas fuentes. Muchos tipos de procesamiento, pero necesita mucha data.
+# hidden_layer_sizes cuantas capas tendrá la red, entre más capas mas recursos se necesitan.
+# y cuantas veces se van a iterar en estas capas. Son tres capas de 11 clasificadores cada uno.
+mlpc = MLPClassifier(hidden_layer_sizes=(11,11,11), max_iter=500)
+mlpc.fit(X_train, y_train)
+pred_mlpc = mlpc.predict(X_test)
+print(classification_report(y_test, pred_mlpc,  zero_division=1))
+'''              precision    recall  f1-score   support
+
+           0       0.98      0.97      0.97       149
+           1       0.62      0.73      0.67        11
+
+    accuracy                           0.95       160
+   macro avg       0.80      0.85      0.82       160
+weighted avg       0.95      0.95      0.95       160
+'''
+print(confusion_matrix(y_test, pred_mlpc))
+'''[[144   5]
+    [  3   8]]'''
+# Con estos resultados podemos concluir que es muy poca información
+# para utilizar MLPC. 
+# ---------------------------------------------------------------------------------------------------#
+# Globales:
+# Modelo    macro avg   weighted avg
+# RFC:          0.78        0.96
+# SVM:          0.97        0.94
+# MLPC:         0.80        0.95
+# ---------------------------------------------------------------------------------------------------#
+predicts = [prediction_RFC, pred_clf, pred_mlpc]
+for preds in predicts:
+    cm = accuracy_score(y_test, preds)
+    print(cm)
+# con el accuracy_score 
+# 0.95625
+# 0.93125
+# 0.925
